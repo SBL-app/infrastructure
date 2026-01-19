@@ -107,7 +107,7 @@ services:
       context: ./SBL-app
       dockerfile: Dockerfile
       args:
-        VITE_API_URL: https://${API_DOMAIN}
+        VITE_API_URL: https://${API_DOMAIN}/api
     container_name: sbl-frontend
     restart: unless-stopped
     networks:
