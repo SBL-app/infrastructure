@@ -131,7 +131,7 @@ services:
     environment:
       DISCORD_TOKEN: ${DISCORD_TOKEN}
       DISCORD_CLIENT_ID: ${DISCORD_CLIENT_ID}
-      API_URL: http://bot-gateway
+      API_URL: http://bot-gateway/api
       API_SECRET: ${DISCORD_BOT_SECRET}
     networks:
       - bot-network
