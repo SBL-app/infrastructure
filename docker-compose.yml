@@ -3,7 +3,7 @@ services:
   # REVERSE PROXY - Traefik
   # ===========================================
   traefik:
-    image: traefik:v3.0
+    image: traefik:v3
     container_name: sbl-traefik
     restart: unless-stopped
     command:
@@ -98,6 +98,7 @@ services:
       - "traefik.http.routers.api.entrypoints=websecure"
       - "traefik.http.routers.api.tls.certresolver=letsencrypt"
       - "traefik.http.services.api.loadbalancer.server.port=80"
+      - "traefik.docker.network=sbl_web"
 
   # ===========================================
   # FRONTEND - Vue.js (Nginx)
