@@ -1,0 +1,84 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint-yaml:
+    name: Lint YAML
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install yamllint
+        run: pip install yamllint
+
+      - name: Run yamllint
+        run: yamllint .
+
+  lint-actions:
+    name: Lint GitHub Actions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run actionlint
+        uses: raven-actions/actionlint@v2
+
+  validate-compose:
+    name: Validate docker-compose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # `docker compose config` fails on syntax errors and unknown keys.
+      # We provide dummy values so interpolation of required variables succeeds.
+      - name: Validate compose file
+        run: |
+          set -euo pipefail
+          cp .env.example .env
+          docker compose --env-file .env config --quiet
+          echo "docker-compose.yml is valid."
+
+  validate-sql:
+    name: Validate SQL seed syntax
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # `migration_postgres.sql` est un jeu de DONNÉES (TRUNCATE + INSERT) : il
+      # dépend du schéma créé par les migrations Doctrine de l'API. On ne peut
+      # donc pas l'exécuter seul ici. On vérifie uniquement que sa syntaxe est
+      # parseable par PostgreSQL, sans exiger que les tables existent.
+      - name: Parse SQL syntax
+        run: |
+          set -euo pipefail
+          if [ ! -f migration_postgres.sql ]; then
+            echo "No migration_postgres.sql found, skipping."
+            exit 0
+          fi
+          # Base jetable pour laisser PostgreSQL analyser la syntaxe du fichier.
+          docker run --rm --name pg-syntax -e POSTGRES_PASSWORD=sbl -d postgres:16-alpine
+          for _ in $(seq 1 20); do
+            docker exec pg-syntax pg_isready -U postgres >/dev/null 2>&1 && break
+            sleep 1
+          done
+          docker cp migration_postgres.sql pg-syntax:/tmp/seed.sql
+          # Sans ON_ERROR_STOP : on tolère "relation does not exist" (le schéma
+          # est créé par l'API) mais on échoue sur une vraie erreur de syntaxe.
+          OUT=$(docker exec pg-syntax psql -U postgres -f /tmp/seed.sql 2>&1 || true)
+          echo "$OUT"
+          docker rm -f pg-syntax >/dev/null
+          if echo "$OUT" | grep -iqE "syntax error"; then
+            echo "::error::Erreur de syntaxe SQL détectée."
+            exit 1
+          fi
+          echo "Syntaxe SQL valide (les relations manquantes sont attendues hors schéma)."

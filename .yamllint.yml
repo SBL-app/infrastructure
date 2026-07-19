@@ -1,0 +1,18 @@
+---
+# yamllint configuration for the SBL infrastructure repository.
+extends: default
+
+rules:
+  line-length:
+    max: 200
+    level: warning
+  comments:
+    min-spaces-from-content: 1
+  document-start: disable
+  truthy:
+    # Allow GitHub Actions `on:` key.
+    allowed-values: ["true", "false", "on", "off"]
+    check-keys: false
+
+ignore: |
+  .git/

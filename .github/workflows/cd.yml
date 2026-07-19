@@ -1,0 +1,59 @@
+name: CD
+
+# Continuous Deployment: on every push to main, sync the infrastructure
+# files to the production server over SSH and (re)launch the Docker stack.
+#
+# Required repository secrets (Settings > Secrets and variables > Actions):
+#   SSH_HOST        production server hostname or IP
+#   SSH_USER        SSH user with rights to run docker compose
+#   SSH_KEY         private SSH key (PEM) authorised on the server
+#   SSH_PORT        SSH port (optional, defaults to 22)
+#   DEPLOY_PATH     absolute path of the stack on the server (e.g. /opt/sbl)
+#
+# The server is expected to hold a `.env` file (never committed) next to the
+# compose file, containing the production secrets listed in .env.example.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-infrastructure
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Deploy stack over SSH
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure SSH
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -p "${{ secrets.SSH_PORT || '22' }}" -H "${{ secrets.SSH_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Sync infrastructure files
+        run: |
+          set -euo pipefail
+          rsync -az --delete \
+            --exclude '.git' \
+            --exclude '.github' \
+            --exclude '.env' \
+            -e "ssh -i ~/.ssh/deploy_key -p ${{ secrets.SSH_PORT || '22' }}" \
+            ./ "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:${{ secrets.DEPLOY_PATH }}/"
+
+      - name: Launch stack
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/deploy_key -p "${{ secrets.SSH_PORT || '22' }}" \
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
+            "cd '${{ secrets.DEPLOY_PATH }}' && docker compose pull --ignore-pull-failures && docker compose up -d --remove-orphans && docker image prune -f"
+
+      - name: Clean up SSH key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key
