@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint-yaml:
+    name: Lint YAML
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install yamllint
+        run: pip install yamllint
+
+      - name: Run yamllint
+        run: yamllint .
+
+  lint-actions:
+    name: Lint GitHub Actions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run actionlint
+        uses: raven-actions/actionlint@v2
+
+  validate-compose:
+    name: Validate docker-compose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # `docker compose config` fails on syntax errors and unknown keys.
+      # We provide dummy values so interpolation of required variables succeeds.
+      - name: Validate compose file
+        run: |
+          set -euo pipefail
+          cp .env.example .env
+          docker compose --env-file .env config --quiet
+          echo "docker-compose.yml is valid."
+
+  validate-sql:
+    name: Validate SQL migration
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: sbl
+          POSTGRES_PASSWORD: sbl
+          POSTGRES_DB: sbl_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U sbl"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Apply migration to a throwaway database
+        env:
+          PGPASSWORD: sbl
+        run: |
+          set -euo pipefail
+          if [ -f migration_postgres.sql ]; then
+            psql -h localhost -U sbl -d sbl_ci -v ON_ERROR_STOP=1 -f migration_postgres.sql
+            echo "migration_postgres.sql applied successfully."
+          else
+            echo "No migration_postgres.sql found, skipping."
+          fi
