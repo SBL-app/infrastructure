@@ -1,0 +1,40 @@
+version: 2
+
+# Processus de mise à jour des dépendances — Infrastructure (C4.1.1)
+#
+# Périmètre  : images Docker référencées par le docker-compose (Traefik,
+#              PostgreSQL, Nginx, Uptime Kuma) et actions CI.
+# Fréquence  : hebdomadaire le lundi.
+# Mode       : automatique pour la détection, manuel pour la validation, avec
+#              une vigilance particulière sur PostgreSQL — un changement de
+#              version majeure impose une migration du répertoire de données
+#              et ne peut donc jamais être appliqué sans sauvegarde préalable.
+
+updates:
+  - package-ecosystem: docker
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "08:00"
+      timezone: Europe/Paris
+    open-pull-requests-limit: 5
+    labels:
+      - "type:deps"
+      - "composant:infra"
+    commit-message:
+      prefix: "deps"
+    ignore:
+      - dependency-name: "*"
+        update-types:
+          - version-update:semver-major
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: monthly
+    labels:
+      - "type:deps"
+      - "composant:infra"
+    commit-message:
+      prefix: "ci"
