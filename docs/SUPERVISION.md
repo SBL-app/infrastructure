@@ -132,10 +132,12 @@ L'implémentation transmet également la latence websocket, ce qui permet de sui
 |---|---|
 | Type | Docker Container |
 | Hôte | `/var/run/docker.sock` (montage en lecture seule) |
-| Conteneurs | `sbl-api`, `sbl-scheduler`, `sbl-postgres`, `sbl-frontend`, `sbl-bot` |
+| Conteneurs | `sbl-api`, `sbl-postgres`, `sbl-frontend`, `sbl-bot` |
 | Intervalle | 60 s |
 
 **Finalité.** Les conteneurs sont configurés en `restart: unless-stopped`. Un conteneur qui plante et redémarre en boucle peut donc rester invisible : entre deux redémarrages, il répond normalement aux sondes HTTP. Cette sonde surveille l'état du conteneur lui-même et révèle les redémarrages répétés, symptôme classique d'une fuite mémoire ou d'une erreur de configuration.
+
+**Périmètre effectif.** Le conteneur `sbl-scheduler` n'est pas supervisé : le service `scheduler` n'est pas publié sur la branche `main` du dépôt d'infrastructure et n'existe donc pas en production. L'inscrire dans la sonde produirait un état rouge permanent et un flux d'alertes ininterrompu — précisément la fatigue d'alerte que la section 4 cherche à éviter. Le scheduler reste couvert indirectement, comme indiqué en section 1 : sa défaillance se traduit par une absence de messages émis par le bot, détectée par la sonde de heartbeat. La ligne est à réintroduire dans `docs/scripts/setup-uptime-kuma.py` (`DOCKER_CONTAINERS`) le jour où le service est déployé.
 
 ---
 
@@ -205,7 +207,24 @@ Le token de push est généré par Uptime Kuma à la création de la sonde de ty
 docker compose up -d uptime-kuma
 ```
 
-Puis, à la première connexion sur `https://<MONITORING_DOMAIN>` :
+Puis, à la première connexion sur `https://<MONITORING_DOMAIN>`, créer le compte
+administrateur — l'interface n'est pas exposée sans authentification.
+
+La configuration du dispositif est ensuite automatisée par
+`docs/scripts/setup-uptime-kuma.py`, qui pilote l'API socket.io d'Uptime Kuma.
+Le script est idempotent : il peut être relancé sans dupliquer les sondes.
+
+```bash
+docker run --rm --network sbl_web \
+  -e KUMA_URL=http://uptime-kuma:3001 \
+  -e KUMA_USERNAME -e KUMA_PASSWORD -e DISCORD_WEBHOOK_URL \
+  -v /opt/sbl/.env:/opt/sbl/.env:ro \
+  sbl-kuma-setup:1
+```
+
+Il effectue les étapes suivantes, décrites ici pour mémoire — et à suivre
+manuellement dans l'interface si le script est indisponible :
+
 
 1. Créer le compte administrateur (l'interface n'est pas exposée sans authentification).
 2. Créer la notification Discord : *Settings → Notifications → Discord*, coller l'URL du webhook.
