@@ -12,6 +12,12 @@ name: CD
 #
 # The server is expected to hold a `.env` file (never committed) next to the
 # compose file, containing the production secrets listed in .env.example.
+#
+# Four repositories deploy into the same DEPLOY_PATH: this one owns the compose
+# file and `docker/`, while `api`, `bot` and `SBL-app` each own the
+# subdirectory of the same name. Two consequences, both handled below:
+# the rsync must not delete what it does not own, and the compose commands must
+# not run while another repository is deploying.
 
 on:
   push:
@@ -26,6 +32,10 @@ jobs:
   deploy:
     name: Deploy stack over SSH
     runs-on: ubuntu-latest
+    env:
+      SSH_PORT: ${{ secrets.SSH_PORT || '22' }}
+      SSH_TARGET: ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}
+      DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
     steps:
       - uses: actions/checkout@v4
 
@@ -35,8 +45,13 @@ jobs:
           mkdir -p ~/.ssh
           echo "${{ secrets.SSH_KEY }}" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -p "${{ secrets.SSH_PORT || '22' }}" -H "${{ secrets.SSH_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
+          ssh-keyscan -p "$SSH_PORT" -H "${{ secrets.SSH_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
 
+      # `--delete` supprime tout ce qui, sur le serveur, n'est pas dans ce
+      # dépôt — y compris les sources déployées par les trois autres. Vider
+      # `api/` ne casse pas seulement le prochain build : le conteneur monte ce
+      # répertoire en lecture seule sur `/var/www/html`, donc la racine de
+      # l'API en production se retrouve vide dans la foulée.
       - name: Sync infrastructure files
         run: |
           set -euo pipefail
@@ -44,15 +59,40 @@ jobs:
             --exclude '.git' \
             --exclude '.github' \
             --exclude '.env' \
-            -e "ssh -i ~/.ssh/deploy_key -p ${{ secrets.SSH_PORT || '22' }}" \
-            ./ "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:${{ secrets.DEPLOY_PATH }}/"
+            --exclude '/api' \
+            --exclude '/bot' \
+            --exclude '/SBL-app' \
+            -e "ssh -i ~/.ssh/deploy_key -p $SSH_PORT" \
+            ./ "$SSH_TARGET:$DEPLOY_PATH/"
 
+      # Les quatre dépôts pilotent le même projet docker compose. Un `up`
+      # concurrent recrée des conteneurs sous les pieds de l'autre, et
+      # `--remove-orphans` peut supprimer un service que l'autre vient de
+      # lancer ; `image prune -f` peut emporter les couches intermédiaires d'un
+      # build en cours. `concurrency:` ne protège de rien ici : les groupes
+      # sont propres à un dépôt et ne se voient pas entre eux.
+      #
+      # D'où un verrou côté serveur, seul point commun aux quatre pipelines. Il
+      # ne sérialise vraiment qu'une fois les trois autres dépôts passés au
+      # même verrou (`/tmp/sbl-deploy.lock`) — voir la PR.
       - name: Launch stack
         run: |
           set -euo pipefail
-          ssh -i ~/.ssh/deploy_key -p "${{ secrets.SSH_PORT || '22' }}" \
-            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
-            "cd '${{ secrets.DEPLOY_PATH }}' && docker compose pull --ignore-pull-failures && docker compose up -d --remove-orphans && docker image prune -f"
+          ssh -i ~/.ssh/deploy_key -p "$SSH_PORT" "$SSH_TARGET" \
+            "DEPLOY_PATH='$DEPLOY_PATH' bash -s" <<'REMOTE'
+          set -euo pipefail
+
+          exec 9>/tmp/sbl-deploy.lock
+          if ! flock -w 300 9; then
+            echo "::error::verrou de déploiement non obtenu après 300 s : un autre déploiement est en cours"
+            exit 1
+          fi
+
+          cd "$DEPLOY_PATH"
+          docker compose pull --ignore-pull-failures
+          docker compose up -d --remove-orphans
+          docker image prune -f
+          REMOTE
 
       - name: Clean up SSH key
         if: always()
