@@ -11,7 +11,7 @@ jobs:
     name: Lint YAML
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -28,7 +28,7 @@ jobs:
     name: Lint GitHub Actions
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Run actionlint
         uses: raven-actions/actionlint@v2
@@ -37,7 +37,7 @@ jobs:
     name: Validate docker-compose
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # `docker compose config` fails on syntax errors and unknown keys.
       # We provide dummy values so interpolation of required variables succeeds.
@@ -52,7 +52,7 @@ jobs:
     name: Validate SQL seed syntax
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # `migration_postgres.sql` est un jeu de DONNÉES (TRUNCATE + INSERT) : il
       # dépend du schéma créé par les migrations Doctrine de l'API. On ne peut
