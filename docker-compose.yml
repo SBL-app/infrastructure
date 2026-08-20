@@ -57,11 +57,20 @@ services:
     build:
       context: ./api
       dockerfile: Dockerfile
+      args:
+        APP_VERSION: ${APP_VERSION:-dev}
+        APP_COMMIT: ${APP_COMMIT:-unknown}
     container_name: sbl-api
     restart: unless-stopped
     environment:
       APP_ENV: prod
       APP_SECRET: ${APP_SECRET}
+      # Version déployée : exposée par GET /api/health pour corréler une anomalie
+      # remontée en production avec une release précise du journal de versions.
+      APP_VERSION: ${APP_VERSION:-dev}
+      APP_COMMIT: ${APP_COMMIT:-unknown}
+      # Collecte automatique des anomalies. Vide par défaut : le SDK reste inerte.
+      SENTRY_DSN: ${SENTRY_DSN:-}
       DATABASE_URL: postgresql://${POSTGRES_USER:-sbl}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-sbl}?serverVersion=16&charset=utf8
       CORS_ALLOW_ORIGIN: ${CORS_ALLOW_ORIGIN}
       JWT_SECRET_KEY: /var/www/html/config/jwt/private.pem
@@ -134,6 +143,11 @@ services:
       DISCORD_CLIENT_ID: ${DISCORD_CLIENT_ID}
       API_URL: http://bot-gateway/api
       API_SECRET: ${DISCORD_BOT_SECRET}
+      # Sonde push (heartbeat) vers Uptime Kuma. Le bot n'expose aucun port :
+      # c'est lui qui signale sa vitalité, ce qui permet de détecter un bot
+      # « zombie » (process vivant mais websocket Discord rompue).
+      UPTIME_KUMA_PUSH_URL: ${UPTIME_KUMA_PUSH_URL:-}
+      UPTIME_KUMA_PUSH_INTERVAL: ${UPTIME_KUMA_PUSH_INTERVAL:-60}
     networks:
       - bot-network
     # No ports exposed - bot only makes outbound connections
@@ -161,6 +175,39 @@ services:
       - bot-network
     # No external access - only bridges internal and bot networks
 
+  # ===========================================
+  # SUPERVISION - Uptime Kuma
+  # Sondes de disponibilité + alerting Discord + status page publique
+  # Voir docs/SUPERVISION.md pour le détail des sondes et des seuils.
+  # ===========================================
+  uptime-kuma:
+    image: louislam/uptime-kuma:1
+    container_name: sbl-uptime-kuma
+    restart: unless-stopped
+    volumes:
+      - uptime-kuma-data:/app/data
+      # Lecture seule sur le socket Docker : permet les sondes de type
+      # « Docker Container » (détection des redémarrages en boucle) sans
+      # accorder de droit d'écriture sur l'hôte.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      # web         : exposition de la status page via Traefik
+      # internal    : sondes directes sur l'API et PostgreSQL, sans passer par
+      #               Internet (mesure la santé réelle, pas celle du proxy)
+      # bot-network : réception du heartbeat push émis par le bot Discord
+      - web
+      - internal
+      - bot-network
+    depends_on:
+      - postgres
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.uptime.rule=Host(`${MONITORING_DOMAIN}`)"
+      - "traefik.http.routers.uptime.entrypoints=websecure"
+      - "traefik.http.routers.uptime.tls.certresolver=letsencrypt"
+      - "traefik.http.services.uptime.loadbalancer.server.port=3001"
+      - "traefik.docker.network=sbl_web"
+
 networks:
   # External network - accessible from internet via Traefik
   web:
@@ -179,3 +226,4 @@ volumes:
   postgres-data:
   traefik-certificates:
   api-jwt-keys:
+  uptime-kuma-data:
