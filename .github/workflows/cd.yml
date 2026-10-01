@@ -37,7 +37,7 @@ jobs:
       SSH_TARGET: ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}
       DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Configure SSH
         run: |
