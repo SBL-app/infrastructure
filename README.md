@@ -15,6 +15,7 @@ le tout orchestré par Docker Compose avec des réseaux isolés.
 | `frontend`    | Application Vue (build statique servi par Nginx)  | `web`             |
 | `bot`         | Bot Discord (isolé, sans port exposé)             | `bot-network`     |
 | `bot-gateway` | Passerelle bot → API                              | `internal`, `bot-network` |
+| `bot-notify-relay` | Relais API → bot (`POST /notify` uniquement) | `internal`, `bot-network` |
 
 Le réseau `internal` est marqué `internal: true` : la base et l'API ne sont
 donc jamais joignables directement depuis Internet.
@@ -34,6 +35,20 @@ n'est jamais commité** (voir `.gitignore`).
 cp .env.example .env
 $EDITOR .env
 ```
+
+### Notifications API → bot
+
+L'API notifie le bot via `bot-notify-relay`, qui ne proxifie que `POST /notify`
+vers `bot:3001` (404 sinon). Le bot n'a toujours aucun port publié et reste hors
+du réseau `internal`. Variables à poser dans `.env` :
+
+| Variable                 | Usage                                                        |
+| ------------------------ | ------------------------------------------------------------ |
+| `DISCORD_BOT_NOTIFY_KEY` | Clé partagée API ↔ bot (génération : `openssl rand -hex 32`) |
+| `FRONTEND_URL`           | Déjà présente ; transmise au bot sous le nom `FRONT_URL`      |
+
+`DISCORD_BOT_NOTIFY_URL` (`http://bot-notify-relay/notify`) et `NOTIFY_PORT`
+(`3001`) sont fixés dans `docker-compose.yml`.
 
 ## Démarrage local
 

@@ -81,6 +81,9 @@ services:
       DISCORD_REDIRECT_URI: ${DISCORD_REDIRECT_URI}
       DISCORD_BOT_SECRET: ${DISCORD_BOT_SECRET}
       FRONTEND_URL: ${FRONTEND_URL}
+      # Notifications : l'API appelle le bot via le relais nginx (bot-notify-relay)
+      DISCORD_BOT_NOTIFY_KEY: ${DISCORD_BOT_NOTIFY_KEY}
+      DISCORD_BOT_NOTIFY_URL: http://bot-notify-relay/notify
     volumes:
       - api-jwt-keys:/var/www/html/config/jwt
     networks:
@@ -149,6 +152,11 @@ services:
       # « zombie » (process vivant mais websocket Discord rompue).
       UPTIME_KUMA_PUSH_URL: ${UPTIME_KUMA_PUSH_URL:-}
       UPTIME_KUMA_PUSH_INTERVAL: ${UPTIME_KUMA_PUSH_INTERVAL:-60}
+      # Réception des notifications de l'API (POST /notify), joignable
+      # uniquement via bot-notify-relay ; aucun port publié.
+      DISCORD_BOT_NOTIFY_KEY: ${DISCORD_BOT_NOTIFY_KEY}
+      NOTIFY_PORT: 3001
+      FRONT_URL: ${FRONTEND_URL}
     networks:
       - bot-network
     # No ports exposed - bot only makes outbound connections
@@ -175,6 +183,21 @@ services:
       - internal
       - bot-network
     # No external access - only bridges internal and bot networks
+
+  # ===========================================
+  # BOT NOTIFY RELAY
+  # API -> bot : ne proxifie que POST /notify vers bot:3001
+  # ===========================================
+  bot-notify-relay:
+    image: nginx:alpine
+    container_name: sbl-bot-notify-relay
+    restart: unless-stopped
+    volumes:
+      - ./docker/nginx/bot-notify-relay.conf:/etc/nginx/conf.d/default.conf:ro
+    networks:
+      - internal
+      - bot-network
+    # No ports exposed - only bridges internal and bot networks
 
   # ===========================================
   # SUPERVISION - Uptime Kuma
